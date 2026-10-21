@@ -1,0 +1,90 @@
+{% extends 'core/base.html' %}
+{% load static %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<section class="form-shell">
+  <div class="form-aside">
+    <p class="eyebrow">{{ eyebrow|default:"GAMEON" }}</p>
+    <h1>{{ title }}</h1>
+    {% if balance != None %}
+      <p class="aside-note">Outstanding balance <strong>₹{{ balance|floatformat:2 }}</strong></p>
+    {% else %}
+      <p class="aside-note">Good games start with a good plan. Pick a time and we’ll take it from there.</p>
+    {% endif %}
+    <div class="aside-stamp">GO<br><span>PLAY</span></div>
+  </div>
+  <div class="form-panel">
+    <form method="post" class="data-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+      {% if eyebrow == "ONLINE BOOKING" or eyebrow == "FRONT DESK" %}
+        {% with field=form.facility %}
+          <div class="field-row{% if field.errors %} has-error{% endif %}">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
+            {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+          </div>
+        {% endwith %}
+        <div class="field-row">
+          <label for="booking-date">Date</label>
+          <input id="booking-date" type="date" min="{% now 'Y-m-d' %}" value="{% now 'Y-m-d' %}" required>
+        </div>
+        <div class="availability-box">
+          <div class="availability-heading">
+            <span>AVAILABLE START TIMES</span>
+            <small id="availability-status">Choose a facility and date</small>
+          </div>
+          <div id="availability-slots" class="availability-slots"></div>
+        </div>
+        {{ form.start_at.as_hidden }}
+        {% with field=form.duration_minutes %}
+          <div class="field-row{% if field.errors %} has-error{% endif %}">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
+            {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+          </div>
+        {% endwith %}
+        {% for field in form %}
+          {% if field.name != "facility" and field.name != "start_at" and field.name != "duration_minutes" and not field.is_hidden %}
+            <div class="field-row{% if field.errors %} has-error{% endif %}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
+              {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+            </div>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        {% for field in form %}
+          {% if field.is_hidden %}
+            {{ field }}
+          {% else %}
+            <div class="field-row{% if field.errors %} has-error{% endif %}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}<small class="help-text">{{ field.help_text }}</small>{% endif %}
+              {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+            </div>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      <button class="button button-lime button-submit" type="submit">
+        {% if eyebrow == "ONLINE BOOKING" %}Check & reserve{% elif eyebrow == "BOOKING PAYMENT" %}Record payment{% else %}Continue <span aria-hidden="true">↗</span>{% endif %}
+      </button>
+    </form>
+  </div>
+</section>
+{% endblock %}
+{% block extra_head %}{% if eyebrow == "ONLINE BOOKING" or eyebrow == "FRONT DESK" %}<link rel="stylesheet" href="{% static 'core/booking.css' %}">{% endif %}{% endblock %}
+{% block scripts %}
+{% if eyebrow == "ONLINE BOOKING" or eyebrow == "FRONT DESK" %}
+<script>
+const facilitySelect=document.getElementById("id_facility");const bookingDate=document.getElementById("booking-date");const durationSelect=document.getElementById("id_duration_minutes");const startInput=document.getElementById("id_start_at");const slotsNode=document.getElementById("availability-slots");const statusNode=document.getElementById("availability-status");
+function normalizeDateValue(rawValue){if(!rawValue)return"";const iso=/^\d{4}-\d{2}-\d{2}$/.test(rawValue);if(iso)return rawValue;const parts=rawValue.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);if(!parts)return rawValue;const [,day,month,year]=parts;return `${year}-${month.padStart(2,"0")}-${day.padStart(2,"0")}`;}
+async function loadSlots(){slotsNode.replaceChildren();startInput.value="";const selectedDate=normalizeDateValue(bookingDate.value);if(!facilitySelect.value||!selectedDate){statusNode.textContent="Choose a facility and date";return}statusNode.textContent="Checking live availability…";const query=new URLSearchParams({facility:facilitySelect.value,date:selectedDate,duration:durationSelect.value});try{const response=await fetch(`/availability/?${query}`);const data=await response.json();const available=data.slots.filter(slot=>slot.available).length;statusNode.textContent=available?`${available} times available`:"No times available";for(const slot of data.slots){const button=document.createElement("button");button.type="button";button.className="slot-button"+(slot.available?"":" slot-unavailable");button.disabled=!slot.available;button.textContent=slot.start;button.addEventListener("click",()=>{startInput.value=`${selectedDate}T${slot.start}`;slotsNode.querySelectorAll(".slot-button").forEach(item=>item.classList.remove("slot-selected"));button.classList.add("slot-selected")});slotsNode.append(button)}}catch{statusNode.textContent="Availability could not be loaded"}}
+facilitySelect.addEventListener("change",loadSlots);bookingDate.addEventListener("change",loadSlots);durationSelect.addEventListener("change",loadSlots);loadSlots();
+</script>
+{% endif %}
+{% endblock %}

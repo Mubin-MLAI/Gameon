@@ -1,0 +1,40 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12231f">
+  <title>{% block title %}GameOn{% endblock %} · GameOn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'core/site.css' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'home' %}" aria-label="GameOn home"><span class="brand-mark">G</span><span>GAME<span class="brand-accent">ON</span><small>SPORTS & ACADEMY</small></span></a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="{% url 'home' %}">Facilities</a>
+      {% if user.is_authenticated and not user.is_staff %}<a href="{% url 'booking_history' %}">My bookings</a>{% endif %}
+      <!-- {% if user.is_authenticated and not user.is_staff %}<a href="{% url 'customer_payment_history' %}">Payment history</a>{% endif %} -->
+      {% if user.is_authenticated and not user.is_staff %}<a href="{% url 'booking_notifications' %}">Notifications</a>{% endif %}
+      {% if user.is_staff %}<a href="{% url 'dashboard' %}">Operations</a>{% endif %}
+    </nav>
+    <div class="nav-actions">
+      {% if user.is_authenticated %}
+        <span class="nav-user">{{ user.first_name|default:user.username }}</span>
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="button button-quiet" type="submit">Sign out</button></form>
+      {% else %}
+        <a class="button button-quiet" href="{% url 'login' %}">Sign in</a>
+        <a class="button button-dark" href="{% url 'register' %}">Join GameOn <span aria-hidden="true">↗</span></a>
+      {% endif %}
+    </div>
+  </header>
+  {% if messages %}<div class="message-stack">{% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+  <main>{% block content %}{% endblock %}</main>
+  <footer class="site-footer"><a class="brand brand-small" href="{% url 'home' %}"><span class="brand-mark">G</span><span>GAME<span class="brand-accent">ON</span></span></a><span>Built for the next game.</span><a href="{% url 'admin:index' %}">Staff sign-in</a></footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

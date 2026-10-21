@@ -1,0 +1,156 @@
+{% extends "core/base.html" %}
+{% load static %}
+{% block title %}Secure payment · {{ booking.booking_id }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/payment.css' %}">{% endblock %}
+{% block content %}
+<section class="confirmation">
+  <div class="confirm-icon">₹</div>
+  <p class="eyebrow">SECURE ONLINE PAYMENT</p>
+  {% if checkout_type == "balance" %}
+    <h1>Pay your balance.</h1>
+    <p class="confirm-lead">Pay the remaining balance for your booking at {{ booking.facility.name }}.</p>
+  {% else %}
+    <h1>Confirm your booking.</h1>
+    <p class="confirm-lead">Pay the required advance to confirm your time at {{ booking.facility.name }}.</p>
+  {% endif %}
+  <div class="receipt">
+    <div class="receipt-top"><span>{% if checkout_type == "balance" %}BOOKING{% else %}BOOKING HOLD{% endif %}</span><strong>{{ booking.booking_id }}</strong></div>
+    <div class="receipt-row"><span>Date &amp; time</span><strong>{{ booking.start_at|date:"D, d M · g:i A" }}–{{ booking.end_at|time:"g:i A" }}</strong></div>
+    <div class="receipt-row"><span>Booking total</span><strong>₹{{ booking.total_amount|floatformat:2 }}</strong></div>
+    {% if checkout_type == "balance" %}
+      <div class="receipt-row"><span>Paid so far</span><strong>₹{{ advance|floatformat:2 }}</strong></div>
+      <div class="receipt-row"><span>Balance due</span><strong>₹{{ balance_due|floatformat:2 }}</strong></div>
+    {% else %}
+      <div class="receipt-row"><span>Advance required</span><strong>₹{{ advance|floatformat:2 }}</strong></div>
+      <div class="receipt-row"><span>Balance after advance</span><strong>₹{{ balance_due|floatformat:2 }}</strong></div>
+      <div class="receipt-row"><span>Hold expires</span><strong>{{ booking.payment_expires_at|date:"g:i A" }}</strong></div>
+    {% endif %}
+  </div>
+  {% if payment_error %}
+    <p class="confirm-lead" role="alert">{{ payment_error }}</p>
+    <a class="button button-dark" href="{% url 'booking_history' %}">View my bookings</a>
+  {% else %}
+    {% if checkout_type == "balance" %}
+      <div class="payment-choice">
+        <label for="payment-amount">Amount to pay</label>
+        <div class="payment-amount-input">
+          <span aria-hidden="true">₹</span>
+          <input id="payment-amount" type="number" min="0.01" max="{{ balance_due }}" step="0.01" value="{{ balance_due|floatformat:2 }}" aria-describedby="payment-amount-help" required>
+        </div>
+        <p id="payment-amount-help">Enter any amount up to ₹{{ balance_due|floatformat:2 }}. You can pay the rest later.</p>
+      </div>
+    {% else %}
+      <div class="payment-choice">
+        <label for="payment-type">Choose how much to pay now</label>
+        <select id="payment-type">
+          <option value="advance">Required advance · ₹{{ booking.advance_required|floatformat:2 }}</option>
+          <option value="full">Full booking total · ₹{{ booking.total_amount|floatformat:2 }}</option>
+        </select>
+      </div>
+    {% endif %}
+    <button id="pay-button" class="button button-lime" type="button">Pay securely</button>
+    <p id="payment-status" class="confirm-lead" role="status" aria-live="polite"></p>
+    <form id="payment-csrf" hidden>{% csrf_token %}</form>
+  {% endif %}
+</section>
+{% if not payment_error %}
+{{ checkout_options|json_script:"checkout-options" }}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if not payment_error %}
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+  const options = JSON.parse(document.getElementById("checkout-options").textContent);
+  const paymentButton = document.getElementById("pay-button");
+  const paymentStatus = document.getElementById("payment-status");
+  const csrfToken = document.querySelector("#payment-csrf [name=csrfmiddlewaretoken]").value;
+  let paymentFailed = false;
+
+  async function openCheckout() {
+    paymentButton.disabled = true;
+    paymentFailed = false;
+    paymentStatus.textContent = "Preparing secure checkout…";
+    try {
+      {% if checkout_type == "balance" %}
+      const amount = document.getElementById("payment-amount").value;
+      if (!document.getElementById("payment-amount").reportValidity()) {
+        paymentButton.disabled = false;
+        paymentStatus.textContent = "Enter a valid amount within the balance due.";
+        return;
+      }
+      const orderBody = new URLSearchParams({ amount });
+      {% else %}
+      const paymentType = document.getElementById("payment-type").value;
+      const orderBody = new URLSearchParams({ payment_type: paymentType });
+      {% endif %}
+      const result = await fetch("{{ order_url|escapejs }}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": csrfToken
+        },
+        body: orderBody
+      });
+      const data = await result.json();
+      if (!result.ok) throw new Error(data.error || "A payment order could not be created.");
+      options.order_id = data.order_id;
+      options.amount = data.amount_paise;
+      paymentStatus.textContent = "";
+      if (!window.Razorpay) {
+        throw new Error("Payment checkout could not load. Check your connection and try again.");
+      }
+      const checkout = new window.Razorpay(options);
+      checkout.on("payment.failed", function () {
+        paymentFailed = true;
+        paymentStatus.textContent = "Payment failed. Check your payment details and try again.";
+        paymentButton.disabled = false;
+      });
+      checkout.open();
+    } catch (error) {
+      paymentStatus.textContent = error instanceof Error ? error.message : "A payment order could not be created.";
+      paymentButton.disabled = false;
+    }
+  }
+
+  options.handler = async function (response) {
+    paymentButton.disabled = true;
+    paymentStatus.textContent = "Verifying payment…";
+    try {
+      const result = await fetch("{{ verify_url|escapejs }}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": csrfToken
+        },
+        body: new URLSearchParams({
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_signature: response.razorpay_signature
+        })
+      });
+      const data = await result.json();
+      if (!result.ok) throw new Error(data.error || "Payment could not be verified.");
+      window.location.assign(data.redirect_url);
+    } catch (error) {
+      paymentStatus.textContent = error instanceof Error ? error.message : "Payment could not be verified.";
+      paymentButton.disabled = false;
+    }
+  };
+  options.modal = {
+    ondismiss: function () {
+      if (paymentFailed) return;
+      {% if checkout_type == "balance" %}
+      paymentStatus.textContent = "Payment window closed. Your booking remains confirmed; you can pay the balance later.";
+      {% else %}
+      paymentStatus.textContent = "Payment window closed. Your slot is held until {{ booking.payment_expires_at|date:'g:i A' }}.";
+      {% endif %}
+      paymentButton.disabled = false;
+    }
+  };
+  options.theme = { color: "#d7f36b" };
+
+  paymentButton.addEventListener("click", openCheckout);
+</script>
+{% endif %}
+{% endblock %}

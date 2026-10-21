@@ -1,0 +1,67 @@
+{% extends 'core/base.html' %}
+{% load static %}
+{% block title %}Booking confirmed{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'core/payment.css' %}">
+<style>
+  @media print {
+    .topbar, .site-footer, .message-stack, #print-receipt, .confirmation > .button { display: none !important; }
+    body, .confirmation { background: #fff !important; color: #000 !important; }
+    .confirmation { max-width: 100%; padding: 0; margin: 0; }
+    .receipt { break-inside: avoid; box-shadow: none !important; border: 1px solid #999 !important; }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<section class="confirmation">
+  <div class="confirm-icon">✓</div>
+  <p class="eyebrow">DIGITAL RECEIPT / INVOICE</p>
+  <h1>Booking confirmed.</h1>
+  <p class="confirm-lead">Keep this receipt for your records.</p>
+  <div class="receipt">
+    <div class="receipt-top"><span>BOOKING ID</span><strong>{{ booking.booking_id }}</strong></div>
+    <div class="receipt-row"><span>Customer</span><strong>{{ booking.customer.name }}</strong></div>
+    <div class="receipt-row"><span>Facility</span><strong>{{ booking.facility.name }}</strong></div>
+    <div class="receipt-row"><span>Date &amp; time</span><strong>{{ booking.start_at|date:"D, d M · g:i A" }}–{{ booking.end_at|time:"g:i A" }}</strong></div>
+    <div class="receipt-row"><span>Total booking amount</span><strong>₹{{ booking.total_amount|floatformat:2 }}</strong></div>
+    <div class="receipt-row"><span>Total paid so far</span><strong>₹{{ booking.advance_paid|floatformat:2 }}</strong></div>
+    <div class="receipt-row"><span>Balance amount</span><strong>₹{{ booking.balance_due|floatformat:2 }}</strong></div>
+    <div class="receipt-row"><span>Status</span><strong>{{ booking.get_status_display }}</strong></div>
+  </div>
+  {% if booking.payments.exists %}
+    <section class="receipt payment-records" aria-labelledby="payment-records-title">
+      <div class="receipt-top">
+        <span id="payment-records-title">PAYMENT HISTORY</span>
+        <strong>{{ booking.payments.count }} payment{{ booking.payments.count|pluralize }}</strong>
+      </div>
+      {% for payment in booking.payments.all %}
+        <article class="payment-record">
+          <div class="payment-record-heading">
+            <span class="payment-record-type">{{ payment.get_direction_display }} · {{ payment.get_method_display }}</span>
+            <strong class="payment-record-amount">₹{{ payment.amount|floatformat:2 }}</strong>
+          </div>
+          <dl class="payment-record-details">
+            <div>
+              <dt>Payment date</dt>
+              <dd>{{ payment.received_at|date:"d M Y, g:i A" }}</dd>
+            </div>
+            <div>
+              <dt>Transaction reference</dt>
+              <dd class="payment-reference">{{ payment.reference|default:"—" }}</dd>
+            </div>
+          </dl>
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+  <button class="button button-outline" type="button" id="print-receipt">Print / Save receipt as PDF</button>
+  <a class="button button-dark" href="{% url 'booking_history' %}">View my bookings <span aria-hidden="true">↗</span></a>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById("print-receipt").addEventListener("click", function () {
+    window.print();
+  });
+</script>
+{% endblock %}

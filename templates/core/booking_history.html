@@ -1,0 +1,43 @@
+{% extends 'core/base.html' %}
+{% block title %}My bookings{% endblock %}
+{% block content %}
+<section class="page-shell">
+  <div class="section-heading">
+    <div><p class="eyebrow">YOUR GAME PLAN</p><h1>My bookings.</h1></div>
+    <div class="heading-actions">
+      <a class="button button-outline" href="{% url 'customer_payment_history' %}">Payment history</a>
+      <a class="button button-lime" href="{% url 'book_facility' %}">Book a slot ↗</a>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Booking</th><th>Facility</th><th>Date &amp; time</th><th>Total</th><th>Paid so far</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for booking in bookings %}
+          <tr>
+            <td class="mono">{{ booking.booking_id }}</td>
+            <td>{{ booking.facility.name }}</td>
+            <td>{{ booking.start_at|date:"D, d M · g:i A" }}–{{ booking.end_at|time:"g:i A" }}</td>
+            <td>₹{{ booking.total_amount|floatformat:2 }}</td>
+            <td>₹{{ booking.advance_paid|floatformat:2 }}</td>
+            <td>₹{{ booking.balance_due|floatformat:2 }}</td>
+            <td><span class="status-pill">{{ booking.get_status_display }}</span></td>
+            <td>
+              {% if booking.status == "pending_payment" %}
+                <a class="text-link" href="{% url 'booking_payment' booking.booking_id %}">Complete payment ↗</a>
+              {% elif booking.status == "confirmed" %}
+                {% if booking.balance_due > 0 %}
+                  <a class="text-link" href="{% url 'booking_balance_payment' booking.booking_id %}">Pay balance ↗</a>
+                {% endif %}
+                <a class="text-link" href="{% url 'booking_confirmation' booking.booking_id %}">View receipt ↗</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="table-empty">No bookings yet. Your next game is one click away.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,10 @@
+.availability-box{margin:-3px 0 16px;padding:12px;background:#e6ece1}
+.availability-heading{display:flex;justify-content:space-between;gap:10px;margin-bottom:9px;font-size:9px;font-weight:700;letter-spacing:.8px}
+.availability-heading small{color:var(--muted);font-size:9px;font-weight:400;letter-spacing:0}
+.availability-heading small.is-error{color:var(--red);font-size:12px;font-weight:700}
+.slot-hint{display:block;margin-top:8px;color:var(--muted);font-size:11px}
+.availability-slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.slot-button{min-height:34px;border:1px solid #aebba8;background:#fff;color:var(--ink);font-size:10px;font-weight:600;cursor:pointer}
+.slot-button:hover,.slot-selected{background:var(--lime);border-color:var(--ink)}
+.slot-unavailable{background:#e4e6df;color:#9ca49b;border-color:#d5d9d1;text-decoration:line-through;cursor:not-allowed}
+@media(max-width:640px){.availability-slots{grid-template-columns:repeat(3,minmax(0,1fr))}}
