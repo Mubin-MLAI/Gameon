@@ -134,6 +134,14 @@ class Booking(models.Model):
 	total_amount = models.DecimalField(max_digits=9, decimal_places=2, validators=[MinValueValidator(0)])
 	advance_required = models.DecimalField(max_digits=9, decimal_places=2, default=0, validators=[MinValueValidator(0)])
 	advance_paid = models.DecimalField(max_digits=9, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+	next_payment_amount = models.DecimalField(
+		max_digits=9,
+		decimal_places=2,
+		null=True,
+		blank=True,
+		validators=[MinValueValidator(Decimal("0.01"))],
+		help_text="Optional exact amount for the customer's next online balance payment. Leave blank to request the full balance.",
+	)
 	payment_order_id = models.CharField(max_length=64, blank=True)
 	payment_expires_at = models.DateTimeField(null=True, blank=True)
 	payment_method = models.CharField(max_length=10, choices=PaymentMethod.choices, blank=True)
@@ -156,6 +164,19 @@ class Booking(models.Model):
 	@property
 	def balance_due(self):
 		return self.total_amount - self.advance_paid
+
+	@property
+	def balance_payment_amount(self):
+		if self.next_payment_amount is None:
+			return self.balance_due
+		return min(self.next_payment_amount, self.balance_due)
+
+	def clean(self):
+		super().clean()
+		if self.next_payment_amount is not None and self.next_payment_amount > self.balance_due:
+			raise ValidationError({
+				"next_payment_amount": "The next payment amount cannot exceed the outstanding balance."
+			})
 
 	def __str__(self):
 		return self.booking_id
@@ -188,6 +209,7 @@ class PaymentOrder(models.Model):
 	booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="payment_orders")
 	order_id = models.CharField(max_length=64, unique=True)
 	amount_paise = models.PositiveIntegerField()
+	is_balance_payment = models.BooleanField(default=False)
 	created_at = models.DateTimeField(auto_now_add=True)
 
 	class Meta:

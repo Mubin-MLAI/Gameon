@@ -6,6 +6,7 @@ import json
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.urls import reverse
@@ -529,7 +530,7 @@ class CustomerRazorpayFlowTests(TestCase):
 		booking = self.create_confirmed_booking_with_balance()
 		order_id = "order_test_balance"
 		payment_id = "pay_test_balance"
-		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=150000)
+		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=150000, is_balance_payment=True)
 		booking.payment_order_id = order_id
 		booking.save(update_fields=["payment_order_id"])
 		signature = hmac.new(
@@ -552,11 +553,13 @@ class CustomerRazorpayFlowTests(TestCase):
 		self.assertEqual(Payment.objects.filter(booking=booking).count(), 2)
 		self.assertTrue(Payment.objects.filter(booking=booking, reference=payment_id, amount=Decimal("1500.00")).exists())
 
-	def test_verified_partial_balance_payment_reduces_outstanding_balance(self):
+	def test_verified_admin_configured_partial_balance_payment_is_accepted(self):
 		booking = self.create_confirmed_booking_with_balance()
-		order_id = "order_test_partial"
-		payment_id = "pay_test_partial"
-		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=40050)
+		booking.next_payment_amount = Decimal("400.50")
+		booking.save(update_fields=["next_payment_amount"])
+		order_id = "order_test_admin_partial"
+		payment_id = "pay_test_admin_partial"
+		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=40050, is_balance_payment=True)
 		booking.payment_order_id = order_id
 		booking.save(update_fields=["payment_order_id"])
 		signature = hmac.new(
@@ -575,12 +578,36 @@ class CustomerRazorpayFlowTests(TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(booking.advance_paid, Decimal("900.50"))
 		self.assertEqual(booking.balance_due, Decimal("1099.50"))
+		self.assertIsNone(booking.next_payment_amount)
+
+	def test_non_balance_order_cannot_be_used_for_partial_balance_payment(self):
+		booking = self.create_confirmed_booking_with_balance()
+		order_id = "order_test_unmarked_partial"
+		payment_id = "pay_test_unmarked_partial"
+		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=40050)
+		booking.payment_order_id = order_id
+		booking.save(update_fields=["payment_order_id"])
+		signature = hmac.new(
+			b"test_secret",
+			f"{order_id}|{payment_id}".encode(),
+			hashlib.sha256,
+		).hexdigest()
+
+		response = self.client.post(reverse("verify_razorpay_payment", args=[booking.booking_id]), {
+			"razorpay_order_id": order_id,
+			"razorpay_payment_id": payment_id,
+			"razorpay_signature": signature,
+		})
+
+		booking.refresh_from_db()
+		self.assertEqual(response.status_code, 400)
+		self.assertEqual(booking.advance_paid, Decimal("500.00"))
 
 	def test_balance_payment_rejects_amount_above_outstanding_balance(self):
 		booking = self.create_confirmed_booking_with_balance()
 		order_id = "order_test_overpayment"
 		payment_id = "pay_test_overpayment"
-		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=150001)
+		PaymentOrder.objects.create(booking=booking, order_id=order_id, amount_paise=150001, is_balance_payment=True)
 		booking.payment_order_id = order_id
 		booking.save(update_fields=["payment_order_id"])
 		signature = hmac.new(
@@ -606,7 +633,6 @@ class CustomerRazorpayFlowTests(TestCase):
 
 		response = self.client.post(
 			reverse("retry_razorpay_balance_order", args=[booking.booking_id]),
-			{"amount": "1500.00"},
 		)
 
 		booking.refresh_from_db()
@@ -614,29 +640,111 @@ class CustomerRazorpayFlowTests(TestCase):
 		self.assertEqual(response.json(), {"order_id": "order_test_balance_retry", "amount_paise": 150000})
 		self.assertEqual(booking.payment_order_id, "order_test_balance_retry")
 		create_order_mock.assert_called_once()
+		self.assertTrue(PaymentOrder.objects.get(order_id="order_test_balance_retry").is_balance_payment)
 
-	@patch("core.views.create_order", return_value="order_test_partial")
-	def test_balance_checkout_can_create_partial_payment_order(self, create_order_mock):
+	@patch("core.views.create_order", return_value="order_test_balance_without_amount")
+	def test_balance_checkout_creates_full_due_order_without_client_amount(self, create_order_mock):
 		booking = self.create_confirmed_booking_with_balance()
 
 		response = self.client.post(
 			reverse("retry_razorpay_balance_order", args=[booking.booking_id]),
-			{"amount": "400.50"},
+			{"payment_type": "full"},
 		)
 
 		self.assertEqual(response.status_code, 200)
-		self.assertEqual(response.json(), {"order_id": "order_test_partial", "amount_paise": 40050})
+		self.assertEqual(response.json(), {"order_id": "order_test_balance_without_amount", "amount_paise": 150000})
 		create_order_mock.assert_called_once()
+		self.assertEqual(create_order_mock.call_args.kwargs["amount_paise"], 150000)
 
-	def test_balance_checkout_rejects_amount_above_due(self):
+	@patch("core.views.create_order", return_value="order_test_admin_installment")
+	def test_balance_checkout_uses_admin_configured_amount(self, create_order_mock):
+		booking = self.create_confirmed_booking_with_balance()
+		booking.next_payment_amount = Decimal("400.50")
+		booking.save(update_fields=["next_payment_amount"])
+
+		response = self.client.post(
+			reverse("retry_razorpay_balance_order", args=[booking.booking_id]),
+			{"payment_type": "installment", "amount": "1.00"},
+		)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.json(), {"order_id": "order_test_admin_installment", "amount_paise": 40050})
+		self.assertEqual(create_order_mock.call_args.kwargs["amount_paise"], 40050)
+		self.assertTrue(PaymentOrder.objects.get(order_id="order_test_admin_installment").is_balance_payment)
+
+	@patch("core.views.create_order", return_value="order_test_full_balance")
+	def test_balance_checkout_offers_full_balance_alongside_admin_installment(self, create_order_mock):
+		booking = self.create_confirmed_booking_with_balance()
+		booking.next_payment_amount = Decimal("400.50")
+		booking.save(update_fields=["next_payment_amount"])
+
+		response = self.client.post(
+			reverse("retry_razorpay_balance_order", args=[booking.booking_id]),
+			{"payment_type": "full"},
+		)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.json(), {"order_id": "order_test_full_balance", "amount_paise": 150000})
+
+	def test_balance_checkout_rejects_unavailable_payment_choice(self):
 		booking = self.create_confirmed_booking_with_balance()
 
 		response = self.client.post(
 			reverse("retry_razorpay_balance_order", args=[booking.booking_id]),
-			{"amount": "1500.01"},
+			{"payment_type": "installment"},
 		)
 
 		self.assertEqual(response.status_code, 400)
+
+	def test_admin_can_set_next_payment_amount_on_booking(self):
+		booking = self.create_confirmed_booking_with_balance()
+		admin_user = User.objects.create_superuser(username="admin", password="admin-password", email="admin@example.com")
+		self.client.force_login(admin_user)
+
+		response = self.client.get(reverse("admin:core_booking_change", args=[booking.pk]))
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, 'name="next_payment_amount"')
+
+		response = self.client.post(
+			reverse("admin:core_booking_change", args=[booking.pk]),
+			{
+				"next_payment_amount": "400.50",
+				"payments-TOTAL_FORMS": str(booking.payments.count()),
+				"payments-INITIAL_FORMS": str(booking.payments.count()),
+				"payments-MIN_NUM_FORMS": "0",
+				"payments-MAX_NUM_FORMS": "1000",
+				"payments-0-id": str(booking.payments.first().pk),
+				"_save": "Save",
+			},
+		)
+
+		booking.refresh_from_db()
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(booking.next_payment_amount, Decimal("400.50"))
+
+	def test_admin_cannot_set_next_payment_above_balance(self):
+		booking = self.create_confirmed_booking_with_balance()
+		booking.next_payment_amount = Decimal("1500.01")
+
+		with self.assertRaises(ValidationError):
+			booking.full_clean()
+
+	def test_balance_checkout_does_not_render_manual_amount_input(self):
+		booking = self.create_confirmed_booking_with_balance()
+		booking.next_payment_amount = Decimal("400.50")
+		booking.save(update_fields=["next_payment_amount"])
+
+		with patch("core.views.create_order", return_value="order_test_balance"):
+			response = self.client.get(reverse("booking_balance_payment", args=[booking.booking_id]))
+
+		self.assertEqual(response.status_code, 200)
+		self.assertNotContains(response, 'id="payment-amount"')
+		self.assertNotContains(response, "Enter any amount up to")
+		self.assertContains(response, "Pay Now")
+		self.assertContains(response, "₹400.50")
+		self.assertContains(response, 'value="installment" selected')
+		self.assertContains(response, 'value="full"')
 
 	def test_pending_payment_hold_blocks_an_overlapping_booking(self):
 		booking = self.create_pending_booking()

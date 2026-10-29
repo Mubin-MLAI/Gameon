@@ -32,12 +32,13 @@
   {% else %}
     {% if checkout_type == "balance" %}
       <div class="payment-choice">
-        <label for="payment-amount">Amount to pay</label>
-        <div class="payment-amount-input">
-          <span aria-hidden="true">₹</span>
-          <input id="payment-amount" type="number" min="0.01" max="{{ balance_due }}" step="0.01" value="{{ balance_due|floatformat:2 }}" aria-describedby="payment-amount-help" required>
-        </div>
-        <p id="payment-amount-help">Enter any amount up to ₹{{ balance_due|floatformat:2 }}. You can pay the rest later.</p>
+        <label for="balance-payment-type">Pay Now</label>
+        <select id="balance-payment-type">
+          {% if booking.next_payment_amount and booking.next_payment_amount < balance_due %}
+            <option value="installment" selected>Admin-set amount · ₹{{ payment_amount|floatformat:2 }}</option>
+          {% endif %}
+          <option value="full" {% if not booking.next_payment_amount or booking.next_payment_amount >= balance_due %}selected{% endif %}>Full balance · ₹{{ balance_due|floatformat:2 }}</option>
+        </select>
       </div>
     {% else %}
       <div class="payment-choice">
@@ -73,13 +74,8 @@
     paymentStatus.textContent = "Preparing secure checkout…";
     try {
       {% if checkout_type == "balance" %}
-      const amount = document.getElementById("payment-amount").value;
-      if (!document.getElementById("payment-amount").reportValidity()) {
-        paymentButton.disabled = false;
-        paymentStatus.textContent = "Enter a valid amount within the balance due.";
-        return;
-      }
-      const orderBody = new URLSearchParams({ amount });
+      const paymentType = document.getElementById("balance-payment-type").value;
+      const orderBody = new URLSearchParams({ payment_type: paymentType });
       {% else %}
       const paymentType = document.getElementById("payment-type").value;
       const orderBody = new URLSearchParams({ payment_type: paymentType });

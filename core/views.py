@@ -37,7 +37,7 @@ from .payment_gateway import PaymentGatewayError, create_order, verify_payment_s
 logger = logging.getLogger(__name__)
 
 
-def create_booking_payment_order(booking, amount=None):
+def create_booking_payment_order(booking, amount=None, *, is_balance_payment=False):
     amount = booking.advance_required if amount is None else amount
     amount_paise = int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     order_id = create_order(
@@ -49,6 +49,7 @@ def create_booking_payment_order(booking, amount=None):
             booking=booking,
             order_id=order_id,
             amount_paise=amount_paise,
+            is_balance_payment=is_balance_payment,
         )
         booking.payment_order_id = order_id
         booking.save(update_fields=["payment_order_id"])
@@ -76,6 +77,8 @@ def record_captured_payment(*, order_id, payment_id, amount_paise):
             if amount not in (booking.advance_required, booking.total_amount):
                 raise PaymentGatewayError("Captured amount does not match the advance or booking total.")
         elif booking.status == Booking.Status.CONFIRMED:
+            if not payment_order.is_balance_payment:
+                raise PaymentGatewayError("This Razorpay order is not for a booking balance payment.")
             if amount <= 0 or amount > booking.balance_due:
                 raise PaymentGatewayError("Captured amount exceeds the outstanding booking balance.")
         else:
@@ -95,6 +98,9 @@ def record_captured_payment(*, order_id, payment_id, amount_paise):
         if booking.status == Booking.Status.PENDING_PAYMENT:
             booking.status = Booking.Status.CONFIRMED
             update_fields.append("status")
+        else:
+            booking.next_payment_amount = None
+            update_fields.append("next_payment_amount")
         booking.save(update_fields=update_fields)
         AuditLog.objects.create(
             action="payment.recorded",
@@ -297,22 +303,28 @@ def booking_balance_payment(request, booking_id):
     if booking.status != Booking.Status.CONFIRMED or booking.balance_due <= 0:
         return redirect("booking_confirmation", booking_id=booking.booking_id)
 
-    amount_paise = int((booking.balance_due * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    payment_amount = booking.balance_payment_amount
+    amount_paise = int((payment_amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     payment_order = PaymentOrder.objects.filter(
         booking=booking,
         order_id=booking.payment_order_id,
         amount_paise=amount_paise,
+        is_balance_payment=True,
     ).first()
     if not payment_order:
         try:
-            payment_order = create_booking_payment_order(booking, amount=booking.balance_due)
+            payment_order = create_booking_payment_order(
+                booking,
+                amount=payment_amount,
+                is_balance_payment=True,
+            )
         except PaymentGatewayError as error:
             return render(request, "core/razorpay_checkout.html", {
                 "booking": booking,
                 "advance": booking.advance_paid,
                 "balance_due": booking.balance_due,
                 "checkout_type": "balance",
-                "payment_amount": booking.balance_due,
+                "payment_amount": payment_amount,
                 "payment_error": str(error),
             })
 
@@ -334,7 +346,7 @@ def booking_balance_payment(request, booking_id):
         "advance": booking.advance_paid,
         "balance_due": booking.balance_due,
         "checkout_type": "balance",
-        "payment_amount": booking.balance_due,
+        "payment_amount": payment_amount,
         "checkout_options": checkout_options,
         "verify_url": reverse("verify_razorpay_payment", args=[booking.booking_id]),
         "order_url": reverse("retry_razorpay_balance_order", args=[booking.booking_id]),
@@ -406,19 +418,21 @@ def retry_razorpay_balance_order(request, booking_id):
         return JsonResponse({"error": "POST required."}, status=405)
     if booking.status != Booking.Status.CONFIRMED or booking.balance_due <= 0:
         return JsonResponse({"error": "This booking has no balance awaiting payment."}, status=400)
+    payment_type = request.POST.get("payment_type", "full")
+    if payment_type == "installment":
+        if booking.next_payment_amount is None:
+            return JsonResponse({"error": "No installment amount is currently configured for this booking."}, status=400)
+        amount = booking.balance_payment_amount
+    elif payment_type == "full":
+        amount = booking.balance_due
+    else:
+        return JsonResponse({"error": "Choose the configured payment amount or the full balance."}, status=400)
     try:
-        amount = Decimal(request.POST.get("amount", ""))
-    except (ArithmeticError, ValueError):
-        return JsonResponse({"error": "Enter a valid payment amount."}, status=400)
-    if (
-        not amount.is_finite()
-        or amount <= 0
-        or amount > booking.balance_due
-        or amount != amount.quantize(Decimal("0.01"))
-    ):
-        return JsonResponse({"error": "Payment must be a positive amount up to the outstanding balance, with at most two decimal places."}, status=400)
-    try:
-        payment_order = create_booking_payment_order(booking, amount=amount)
+        payment_order = create_booking_payment_order(
+            booking,
+            amount=amount,
+            is_balance_payment=True,
+        )
     except PaymentGatewayError as error:
         return JsonResponse({"error": str(error)}, status=502)
     return JsonResponse({

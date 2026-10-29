@@ -12,8 +12,7 @@
   font-weight: 700;
 }
 
-.payment-choice select,
-.payment-amount-input {
+.payment-choice select {
   width: 100%;
   min-height: 50px;
   border: 1px solid #cbd3c9;
@@ -26,41 +25,9 @@
   font-weight: 600;
 }
 
-.payment-choice select:focus,
-.payment-amount-input:focus-within {
+.payment-choice select:focus {
   border-color: var(--forest);
   outline: 3px solid #d7f36b80;
-}
-
-.payment-amount-input {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-}
-
-.payment-amount-input span {
-  color: var(--muted);
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.payment-amount-input input {
-  width: 100%;
-  min-width: 0;
-  height: 48px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.payment-choice p {
-  margin: 7px 0 0;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .payment-choice + .button {
