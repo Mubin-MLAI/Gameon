@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'core/site.css' %}">
+  <link rel="stylesheet" href="{% static 'core/mobile-nav.css' %}">
   {% block extra_head %}{% endblock %}
 </head>
 <body>
@@ -24,7 +25,7 @@
     </nav>
     <div class="nav-actions">
       {% if user.is_authenticated %}
-        <span class="nav-user">{{ user.first_name|default:user.username }}</span>
+        <span class="nav-user">Signed in as {{ user.first_name|default:user.gameon_customer.name|default:user.username }}</span>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="button button-quiet" type="submit">Sign out</button></form>
       {% else %}
         <a class="button button-quiet" href="{% url 'login' %}">Sign in</a>

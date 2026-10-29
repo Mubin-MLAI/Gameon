@@ -492,6 +492,14 @@ class CustomerRazorpayFlowTests(TestCase):
 		self.assertContains(response, reverse("booking_balance_payment", args=[booking.booking_id]))
 		self.assertContains(response, "Pay balance")
 
+	def test_customer_header_shows_identity_and_navigation_links(self):
+		response = self.client.get(reverse("booking_history"))
+
+		self.assertContains(response, "Signed in as Razorpay Customer")
+		self.assertContains(response, reverse("home"))
+		self.assertContains(response, reverse("booking_history"))
+		self.assertContains(response, reverse("booking_notifications"))
+
 	def test_booking_receipt_groups_each_payment_with_labeled_details(self):
 		booking = self.create_confirmed_booking_with_balance()
 		Payment.objects.create(
